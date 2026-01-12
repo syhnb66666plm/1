@@ -1,0 +1,190 @@
+import sqlite3
+import datetime
+
+# ==========================================
+# 数据库连接与初始化
+# ==========================================
+def init_db():
+    conn = sqlite3.connect('hospital.db')
+    cursor = conn.cursor()
+    
+    # 创建医生表
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS doctors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        department TEXT NOT NULL,
+        title TEXT,
+        available_time TEXT
+    )
+    ''')
+    
+    # 创建患者表
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS patients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        gender TEXT,
+        age INTEGER,
+        phone TEXT
+    )
+    ''')
+    
+    # 创建挂号表
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS registrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        patient_id INTEGER,
+        doctor_id INTEGER,
+        reg_date TEXT,
+        reg_time TEXT,
+        status TEXT DEFAULT '已挂号',
+        FOREIGN KEY (patient_id) REFERENCES patients (id),
+        FOREIGN KEY (doctor_id) REFERENCES doctors (id)
+    )
+    ''')
+    
+    conn.commit()
+    conn.close()
+    print("数据库初始化完成！")
+
+# ==========================================
+# 医生管理功能
+# ==========================================
+def add_doctor():
+    print("\n--- 添加新医生 ---")
+    name = input("医生姓名: ")
+    department = input("所属科室: ")
+    title = input("职称 (如：主任医师): ")
+    available_time = input("可预约时间 (如：周一至周五 8:00-12:00): ")
+    
+    conn = sqlite3.connect('hospital.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+    INSERT INTO doctors (name, department, title, available_time)
+    VALUES (?, ?, ?, ?)
+    ''', (name, department, title, available_time))
+    conn.commit()
+    print(f"医生 {name} 添加成功！")
+    conn.close()
+
+def list_doctors():
+    print("\n--- 医生列表 ---")
+    conn = sqlite3.connect('hospital.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM doctors")
+    doctors = cursor.fetchall()
+    conn.close()
+    
+    if not doctors:
+        print("暂无医生信息。")
+        return
+    
+    for d in doctors:
+        print(f"ID: {d[0]}, 姓名: {d[1]}, 科室: {d[2]}, 职称: {d[3]}, 时间: {d[4]}")
+
+# ==========================================
+# 患者管理功能
+# ==========================================
+def add_patient():
+    print("\n--- 新患者注册 ---")
+    name = input("患者姓名: ")
+    gender = input("性别 (男/女): ")
+    age = int(input("年龄: "))
+    phone = input("电话号码: ")
+    
+    conn = sqlite3.connect('hospital.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+    INSERT INTO patients (name, gender, age, phone)
+    VALUES (?, ?, ?, ?)
+    ''', (name, gender, age, phone))
+    patient_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    print(f"患者 {name} 注册成功！您的患者ID是: {patient_id}")
+    return patient_id
+
+def find_patient():
+    pid = input("\n请输入患者ID (如果不知道ID，请输入姓名查询): ")
+    conn = sqlite3.connect('hospital.db')
+    cursor = conn.cursor()
+    
+    if pid.isdigit():
+        cursor.execute("SELECT * FROM patients WHERE id=?", (int(pid),))
+    else:
+        cursor.execute("SELECT * FROM patients WHERE name LIKE ?", (f'%{pid}%',))
+        
+    patients = cursor.fetchall()
+    conn.close()
+    
+    if not patients:
+        print("未找到该患者。")
+        return None
+    
+    print("\n--- 查询结果 ---")
+    for p in patients:
+        print(f"ID: {p[0]}, 姓名: {p[1]}, 性别: {p[2]}, 年龄: {p[3]}, 电话: {p[4]}")
+    
+    # 如果查询结果唯一，直接返回ID
+    if len(patients) == 1:
+        return patients[0][0]
+    else:
+        # 如果有多个结果，让用户选择
+        selected_id = int(input("请选择要挂号的患者ID: "))
+        return selected_id
+
+# ==========================================
+# 挂号核心功能
+# ==========================================
+def make_registration():
+    print("\n--- 挂号服务 ---")
+    
+    # 1. 确认患者身份
+    patient_id = find_patient()
+    if not patient_id:
+        # 如果没找到患者，询问是否注册新患者
+        if input("未找到患者，是否注册新患者？(y/n): ").lower() == 'y':
+            patient_id = add_patient()
+        else:
+            return
+    
+    if not patient_id:
+        return
+    
+    # 2. 选择科室和医生
+    department = input("请输入要挂号的科室: ")
+    conn = sqlite3.connect('hospital.db')
+    cursor = conn.cursor()
+    
+    # 根据科室查询医生
+    cursor.execute("SELECT * FROM doctors WHERE department LIKE ?", (f'%{department}%',))
+    doctors = cursor.fetchall()
+    
+    if not doctors:
+        print(f"未找到 {department} 的医生。")
+        conn.close()
+        return
+    
+    print(f"\n--- {department} 可挂号医生 ---")
+    for d in doctors:
+        print(f"ID: {d[0]}, 姓名: {d[1]}, 职称: {d[3]}, 时间: {d[4]}")
+    
+    doctor_id = int(input("请选择医生ID: "))
+    
+    # 3. 选择挂号时间
+    # 这里简化处理，直接使用当前时间作为挂号时间
+    reg_date = datetime.date.today().strftime("%Y-%m-%d")
+    reg_time = datetime.datetime.now().strftime("%H:%M")
+    
+    # 4. 创建挂号记录
+    cursor.execute('''
+    INSERT INTO registrations (patient_id, doctor_id, reg_date, reg_time, status)
+    VALUES (?, ?, ?, ?, ?)
+    ''', (patient_id, doctor_id, reg_date, reg_time, '已挂号'))
+    
+    reg_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    
+    print(
